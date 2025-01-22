@@ -47,13 +47,7 @@ func main() {
 
 	filtered := filter(sp)
 
-	mins := []string{}
-	for _, w := range filtered {
-		if len(w) > 3 {
-			mins = append(mins, w)
-		}
-	}
-
+	mins := getMins(filtered, 4)
 	writeLines(fmt.Sprintf("mins%s.txt", *sfx), mins)
 
 	pangrams := getPangrams(mins)
@@ -88,6 +82,16 @@ func filter(words []string) []string {
 		}
 	}
 	return filtered
+}
+
+func getMins(words []string, minlen int) []string {
+	mins := []string{}
+	for _, w := range words {
+		if len(w) >= minlen {
+			mins = append(mins, w)
+		}
+	}
+	return mins
 }
 
 func getPangrams(words []string) []string {
