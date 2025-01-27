@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"time"
 )
+
+const pangramLength int = 7
 
 type pangram struct {
 	key   string
@@ -35,25 +38,30 @@ func main() {
 	sfx := flag.String("s", "", "suffix")
 	minWords := flag.Int("min", 12, "min words")
 	maxWords := flag.Int("max", 1000, "max words per length")
+	merge := flag.String("merge", "", "merge another file into the final")
 	flag.Parse()
 
 	start := time.Now()
 
-	s, err := os.ReadFile(*fn)
+	sp, err := readLines(*fn)
 	if err != nil {
 		log.Fatal(err)
 	}
-	sp := strings.Split(string(s), "\r\n")
+	log.Println("read", len(sp))
 
 	filtered := filter(sp)
+	log.Println("filtered", len(filtered))
 
 	mins := getMins(filtered, 4)
+	log.Println("mins", len(mins))
 	writeLines(fmt.Sprintf("mins%s.txt", *sfx), mins)
 
-	pangrams := getPangrams(mins)
+	pangrams := getPangrams(mins, pangramLength)
+	log.Println("pangrams", len(pangrams))
 	writeLines(fmt.Sprintf("pangrams%s.txt", *sfx), pangrams)
 
 	unique := getUnique(pangrams)
+	log.Println("unique", len(unique))
 	plines := []string{}
 	for _, u := range unique {
 		csv := strings.Join(u.words, ", ")
@@ -62,14 +70,44 @@ func main() {
 	writeLines(fmt.Sprintf("unique%s.txt", *sfx), plines)
 
 	solves := getSolves(unique, mins)
-	log.Println("total solves", len(solves))
+	log.Println("solves", len(solves))
 	writeJson(fmt.Sprintf("solves%s.json", *sfx), solves)
 
 	probables := getProbableSolves(solves, *minWords, *maxWords)
-	log.Println("probable solves", len(probables))
+	log.Println("probables", len(probables))
 	writeJson(fmt.Sprintf("probablesolves%s.json", *sfx), probables)
 
+	if *merge != "" {
+		lines, err := readLines(*merge)
+		if err != nil {
+			log.Fatal("can't read merge file", *merge, err)
+		}
+		munique := getUnique(getPangrams(getMins(filter(lines), 4), pangramLength))
+		log.Println("munique", len(munique))
+
+		mergePangrams(probables, munique)
+	}
+
+	log.Println("merge", len(probables))
+	writeJson(fmt.Sprintf("merge%s.json", *sfx), probables)
+
 	log.Println("finished.", time.Since(start))
+}
+
+func readLines(filename string) ([]string, error) {
+	s, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer s.Close()
+
+	var sp []string
+	scanner := bufio.NewScanner(s)
+	for scanner.Scan() {
+		sp = append(sp, scanner.Text())
+	}
+
+	return sp, nil
 }
 
 func filter(words []string) []string {
@@ -94,14 +132,14 @@ func getMins(words []string, minlen int) []string {
 	return mins
 }
 
-func getPangrams(words []string) []string {
+func getPangrams(words []string, letters int) []string {
 	pangrams := []string{}
 	for _, w := range words {
 		m := make(map[rune]int)
 		for _, c := range w {
 			m[c]++
 		}
-		if len(m) == 7 {
+		if len(m) == letters {
 			pangrams = append(pangrams, w)
 		}
 	}
@@ -286,7 +324,6 @@ func cleanWords(words []string, key string, maxwords int) []string {
 	}
 
 	if anyzero {
-		log.Println(key, len(words), zeros)
 		return []string{}
 	}
 
@@ -308,6 +345,30 @@ func getWordsWithRune(r rune, words []string) []string {
 		}
 	}
 	return with
+}
+
+func mergePangrams(dest []Solve, src []pangram) {
+	m := make(map[string][]int)
+	for i, d := range dest {
+		m[d.Key] = append(m[d.Key], i)
+	}
+	for _, s := range src {
+		if ixs, ok := m[s.key]; ok {
+			for _, i := range ixs {
+				pm := make(map[string]bool)
+				for _, w := range dest[i].Pangrams {
+					pm[w] = true
+				}
+
+				for _, w := range s.words {
+					if _, ok := pm[w]; ok {
+						continue
+					}
+					dest[i].Pangrams = append(dest[i].Pangrams, w)
+				}
+			}
+		}
+	}
 }
 
 func getLengthCounts(words []string) []LengthCount {
@@ -346,6 +407,6 @@ func writeJson(filename string, v interface{}) error {
 	defer o.Close()
 
 	enc := json.NewEncoder(o)
-	enc.SetIndent(" ", " ")
+	// enc.SetIndent(" ", " ")
 	return enc.Encode(v)
 }
